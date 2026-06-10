@@ -178,7 +178,7 @@ sudo apt-get install software-properties-common curl ca-certificates gnupg -y ||
 sudo add-apt-repository universe -y || exit 1
 # libpng12-0 dependency for wkhtmltopdf for older Ubuntu versions
 if [ "$INSTALL_WKHTMLTOPDF" = "True" ] && [[ "$UBUNTU_VERSION" != "22.04" ]]; then
-    sudo add-apt-repository "deb http://mirrors.kernel.org/ubuntu/ xenial main" -y || exit 1
+    sudo add-apt-repository "deb https://mirrors.kernel.org/ubuntu/ xenial main" -y || exit 1
 fi
 sudo apt-get update || exit 1
 sudo apt-get upgrade -y || exit 1
