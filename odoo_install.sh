@@ -240,6 +240,7 @@ sudo $OE_VENV/bin/pip install -r $AXANTA_ADDONS_PATH/requirements.txt
 
 echo -e "\n---- Setting permissions on home folder ----"
 sudo chown -R $OE_USER:$OE_USER $OE_HOME/*
+sudo chmod -R 755 $OE_HOME
 
 echo -e "* Create server config file"
 
