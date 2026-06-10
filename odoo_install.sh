@@ -36,7 +36,6 @@ OE_SUPERADMIN="admin"
 # Set to "True" to generate a random password, "False" to use the variable in OE_SUPERADMIN
 GENERATE_RANDOM_PASSWORD="True"
 OE_CONFIG="${OE_USER}-server"
-WORKDIR="$(pwd)"
 # Set the website name
 WEBSITE_NAME="_"
 # Set the default Odoo longpolling port (you still have to use -c /etc/odoo-server.conf for example to use this.)
@@ -45,103 +44,21 @@ LONGPOLLING_PORT="8072"
 ENABLE_SSL="True"
 # Provide Email to register ssl certificate
 ADMIN_EMAIL="odoo@example.com"
-
+WORKERS=5
 AXANTA_REPO=https://github.com/burhanghee/ax-addons-16.git
 AXANTA_BRANCH=16.0
+
 AXANTA_ADDONS_PATH=$OE_HOME_EXT/ax-addons-16
-
-PYTHON_VERSION="3.10.12"
-PYTHON_SHORT_VERSION="${PYTHON_VERSION%.*}"
-PYTHON_BIN="/usr/local/bin/python${PYTHON_SHORT_VERSION}"
-ODOO_VENV="$OE_HOME_EXT/venv"
-ODOO_PYTHON_BIN="$ODOO_VENV/bin/python"
-ODOO_PIP_BIN="$ODOO_VENV/bin/pip"
+AXANTA_ADDONS_DIR=$AXANTA_ADDONS_PATH,$AXANTA_ADDONS_PATH/oca_addons,$AXANTA_ADDONS_PATH/3rd_party_addons,$AXANTA_ADDONS_PATH/oca_reporting_addons,$AXANTA_ADDONS_PATH/tier_validation,$AXANTA_ADDONS_PATH/client_addons,$AXANTA_ADDONS_PATH/oca_operating_unit;
 
 
-#--------------------------------------------------
-# Define color variables
-#--------------------------------------------------
-NC='\e[0m';
-REDC='\e[31m';
-GREENC='\e[32m';
-YELLOWC='\e[33m';
-BLUEC='\e[34m';
-LBLUEC='\e[94m';
 
-print_step() {
-    echo -e "\n${BLUEC}---- $1 ----${NC}"
-}
-
-print_info() {
-    echo -e "${LBLUEC}$1${NC}"
-}
-
-print_success() {
-    echo -e "${GREENC}$1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOWC}$1${NC}"
-}
-
-print_error() {
-    echo -e "${REDC}$1${NC}"
-}
-
-install_python_from_source() {
-    if [ -x "$PYTHON_BIN" ]; then
-        INSTALLED_VERSION=$("$PYTHON_BIN" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')
-        if [ "$INSTALLED_VERSION" = "$PYTHON_VERSION" ]; then
-            print_success "Python $PYTHON_VERSION is already installed at $PYTHON_BIN"
-            return
-        fi
-        print_warning "$PYTHON_BIN exists but is Python $INSTALLED_VERSION. Rebuilding Python $PYTHON_VERSION."
-    fi
-
-    PYTHON_TARBALL="Python-${PYTHON_VERSION}.tgz"
-    PYTHON_SOURCE_DIR="/tmp/Python-${PYTHON_VERSION}"
-
-    print_info "Downloading Python $PYTHON_VERSION source"
-    cd /tmp || exit 1
-    sudo rm -rf "$PYTHON_SOURCE_DIR" "$PYTHON_TARBALL"
-    wget -O "$PYTHON_TARBALL" "https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_TARBALL}" || exit 1
-    tar -xzf "$PYTHON_TARBALL" || exit 1
-
-    print_info "Building Python $PYTHON_VERSION"
-    cd "$PYTHON_SOURCE_DIR" || exit 1
-    ./configure --with-ensurepip=install || exit 1
-    make -j "$(nproc)" || exit 1
-    sudo make altinstall || exit 1
-    cd "$WORKDIR" || exit 1
-
-    INSTALLED_VERSION=$("$PYTHON_BIN" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')
-    if [ "$INSTALLED_VERSION" != "$PYTHON_VERSION" ]; then
-        print_error "Expected Python $PYTHON_VERSION, but $PYTHON_BIN reports $INSTALLED_VERSION"
-        exit 1
-    fi
-    print_success "Python $PYTHON_VERSION installed at $PYTHON_BIN"
-}
-
-clone_or_update_repo() {
-    local repo_url="$1"
-    local branch="$2"
-    local target="$3"
-    local repo_name
-    repo_name="$(basename "$target")"
-
-    if [ -d "$target/.git" ]; then
-        print_warning "$repo_name already exists. Updating branch $branch..."
-        sudo -u "$OE_USER" git -C "$target" fetch --depth 1 origin "$branch" || exit 1
-        sudo -u "$OE_USER" git -C "$target" checkout "$branch" || exit 1
-        sudo -u "$OE_USER" git -C "$target" pull --ff-only origin "$branch" || exit 1
-        print_success "$repo_name updated."
-    elif [ -e "$target" ]; then
-        print_error "$target exists but is not a git repository. Move it away before running this script again."
-        exit 1
-    else
-        sudo -u "$OE_USER" git clone --depth 1 --branch "$branch" "$repo_url" "$target" || exit 1
-    fi
-}
+if [[ $UID != 0 ]]; then
+    echo -e "${REDC}ERROR${NC}";
+    echo -e "${YELLOWC}Please run this script as root or with sudo:${NC}"
+    echo -e "${BLUEC}sudo $0 $* ${NC}"
+    exit 1
+fi
 
 ##
 ###  WKHTMLTOPDF download links
@@ -164,7 +81,7 @@ fi
 #--------------------------------------------------
 # Update Server
 #--------------------------------------------------
-print_step "Update Server"
+echo -e "\n---- Update Server ----"
 # universe package is for Ubuntu 18.x
 sudo add-apt-repository universe
 # libpng12-0 dependency for wkhtmltopdf for older Ubuntu versions
@@ -176,36 +93,41 @@ sudo apt-get install libpq-dev
 #--------------------------------------------------
 # Install PostgreSQL Server
 #--------------------------------------------------
-print_step "Install PostgreSQL Server"
-if [ "$INSTALL_POSTGRESQL_FOURTEEN" = "True" ]; then
-    print_info "Installing PostgreSQL V14 due to the user's choice"
-    sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc|sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg 
-    sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' 
-    sudo apt-get update 
-    sudo apt-get install postgresql-14 -y 
+echo -e "\n---- Install PostgreSQL Server ----"
+if [ $INSTALL_POSTGRESQL_FOURTEEN = "True" ]; then
+    echo -e "\n---- Installing postgreSQL V14 due to the user it's choise ----"
+    sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc|sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+    sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+    sudo apt-get update
+    sudo apt-get install postgresql-14
 else
-    print_info "Installing the default PostgreSQL version based on Linux version"
-    sudo apt-get install postgresql postgresql-server-dev-all -y || exit 1
+    echo -e "\n---- Installing the default postgreSQL version based on Linux version ----"
+    sudo apt-get install postgresql postgresql-server-dev-all -y
 fi
 
 
-print_step "Creating the ODOO PostgreSQL User"
+echo -e "\n---- Creating the ODOO PostgreSQL User  ----"
 sudo su - postgres -c "createuser -s $OE_USER" 2> /dev/null || true
 
 #--------------------------------------------------
 # Install Dependencies
 #--------------------------------------------------
-print_step "Installing Python ${PYTHON_VERSION} build dependencies"
-sudo apt-get install git build-essential make wget xz-utils tk-dev libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev libffi-dev liblzma-dev libxml2-dev libxmlsec1-dev llvm python3-cffi python3-dev python3-venv python3-wheel libxslt-dev libzip-dev libldap2-dev libsasl2-dev python3-setuptools node-less libpng-dev libjpeg-dev gdebi -y || exit 1
-install_python_from_source
+echo -e "\n--- Installing Python 3 + pip3 --"
+sudo apt install -y python3.10 python3.10-dev python3.10-venv python3-pip
+sudo apt-get install git python3-cffi build-essential wget python3-dev python3-venv python3-wheel libxslt-dev libzip-dev libldap2-dev libsasl2-dev python3-setuptools node-less libpng-dev libjpeg-dev gdebi -y
 
-print_step "Installing nodeJS NPM and rtlcss for LTR support"
-sudo apt-get install nodejs npm -y || exit 1
-sudo npm install -g rtlcss || exit 1
+# sudo -H pip3 install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt
 
-if [ "$INSTALL_WKHTMLTOPDF" = "True" ]; then
-  print_step "Install wkhtmltopdf"
-  i#pick up correct one from x64 & x32 versions:
+echo -e "\n---- Installing nodeJS NPM and rtlcss for LTR support ----"
+sudo apt-get install nodejs npm -y
+sudo npm install -g rtlcss
+
+#--------------------------------------------------
+# Install Wkhtmltopdf if needed
+#--------------------------------------------------
+if [ $INSTALL_WKHTMLTOPDF = "True" ]; then
+  echo -e "\n---- Install wkhtml and place shortcuts on correct place for ODOO 13 ----"
+  #pick up correct one from x64 & x32 versions:
   if [ "`getconf LONG_BIT`" == "64" ];then
       _url=$WKHTMLTOX_X64
   else
@@ -225,106 +147,116 @@ if [ "$INSTALL_WKHTMLTOPDF" = "True" ]; then
   sudo ln -s /usr/local/bin/wkhtmltopdf /usr/bin
   sudo ln -s /usr/local/bin/wkhtmltoimage /usr/bin
 else
-  print_warning "Wkhtmltopdf isn't installed due to the choice of the user!"
+  echo "Wkhtmltopdf isn't installed due to the choice of the user!"
 fi
 
-print_step "Create ODOO system user"
-if id "$OE_USER" >/dev/null 2>&1; then
-    print_warning "User $OE_USER already exists."
-else
-    sudo adduser --system --quiet --shell=/bin/bash --home="$OE_HOME" --gecos 'ODOO' --group "$OE_USER"
-fi
+echo -e "\n---- Create ODOO system user ----"
+sudo adduser --system --quiet --shell=/bin/bash --home=$OE_HOME --gecos 'ODOO' --group $OE_USER
 #The user should also be added to the sudo'ers group.
-sudo adduser "$OE_USER" sudo
+sudo adduser $OE_USER sudo
 
-print_step "Create Log directory"
-sudo mkdir -p "$OE_HOME"
-sudo mkdir -p "/var/log/$OE_USER"
-sudo chown "$OE_USER:$OE_USER" "/var/log/$OE_USER"
-sudo chown -R "$OE_USER:$OE_USER" "$OE_HOME"
+echo -e "\n---- Create Log directory ----"
+sudo mkdir /var/log/$OE_USER
+sudo chown $OE_USER:$OE_USER /var/log/$OE_USER
 
 #--------------------------------------------------
 # Install ODOO
 #--------------------------------------------------
-print_step "Installing ODOO Server"
-clone_or_update_repo "https://www.github.com/odoo/odoo" "$OE_VERSION" "$OE_HOME_EXT"
+echo -e "\n==== Installing ODOO Server ===="
+sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/odoo $OE_HOME_EXT/
 
-print_step "Installing Axanta Addons"
-clone_or_update_repo "$AXANTA_REPO" "$AXANTA_BRANCH" "$AXANTA_ADDONS_PATH"
+if [ $IS_ENTERPRISE = "True" ]; then
+    # Odoo Enterprise install!
+    sudo pip3 install psycopg2-binary pdfminer.six
+    echo -e "\n--- Create symlink for node"
+    sudo ln -s /usr/bin/nodejs /usr/bin/node
+    sudo su $OE_USER -c "mkdir $OE_HOME/enterprise"
+    sudo su $OE_USER -c "mkdir $OE_HOME/enterprise/addons"
 
-print_step "Creating ODOO Python virtual environment"
-sudo "$PYTHON_BIN" -m venv "$ODOO_VENV" || exit 1
-sudo "$ODOO_PYTHON_BIN" -m pip install --upgrade pip setuptools wheel || exit 1
+    GITHUB_RESPONSE=$(sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/enterprise "$OE_HOME/enterprise/addons" 2>&1)
+    while [[ $GITHUB_RESPONSE == *"Authentication"* ]]; do
+        echo "------------------------WARNING------------------------------"
+        echo "Your authentication with Github has failed! Please try again."
+        printf "In order to clone and install the Odoo enterprise version you \nneed to be an offical Odoo partner and you need access to\nhttp://github.com/odoo/enterprise.\n"
+        echo "TIP: Press ctrl+c to stop this script."
+        echo "-------------------------------------------------------------"
+        echo " "
+        GITHUB_RESPONSE=$(sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/enterprise "$OE_HOME/enterprise/addons" 2>&1)
+    done
 
-print_step "Installing python packages/requirements"
-sudo "$ODOO_PYTHON_BIN" -m pip install -r "https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt" || exit 1
-if [ -f "$AXANTA_ADDONS_PATH/requirements.txt" ]; then
-    sudo "$ODOO_PYTHON_BIN" -m pip install -r "$AXANTA_ADDONS_PATH/requirements.txt" || exit 1
-else
-    print_warning "No Axanta requirements.txt found at $AXANTA_ADDONS_PATH/requirements.txt"
+    echo -e "\n---- Added Enterprise code under $OE_HOME/enterprise/addons ----"
+    echo -e "\n---- Installing Enterprise specific libraries ----"
+    sudo -H pip3 install num2words ofxparse dbfread ebaysdk firebase_admin pyOpenSSL
+    sudo npm install -g less
+    sudo npm install -g less-plugin-clean-css
 fi
 
+echo -e "\n---- Installing Axanta Addons ----"
+if [ ! -d $AXANTA_ADDONS_PATH ]; then
+    git clone --depth 1 --branch $AXANTA_BRANCH $AXANTA_REPO $AXANTA_ADDONS_PATH
+else
+    echo -e "\nAxanta already exists. Updating the repo...\n";
+    cd $AXANTA_ADDONS_PATH
+    git checkout $AXANTA_BRANCH
+    git pull origin $AXANTA_BRANCH
+    cd $WORKDIR
+    echo -e "\nAxanta Repo Updated!\n";
+fi
 
-print_step "Setting permissions on home folder"
-sudo chown -R "$OE_USER:$OE_USER" "$OE_HOME"
+echo -e "\n---- Install python packages/requirements ----"
+sudo -H pip3 install -r $AXANTA_ADDONS_PATH/requirements.txt
 
-print_info "* Create server config file"
+echo -e "\n---- Setting permissions on home folder ----"
+sudo chown -R $OE_USER:$OE_USER $OE_HOME/*
+
+echo -e "* Create server config file"
 
 
-print_info "* Creating server config file"
-if [ "$GENERATE_RANDOM_PASSWORD" = "True" ]; then
-    print_info "* Generating random admin password"
+sudo touch /etc/${OE_CONFIG}.conf
+echo -e "* Creating server config file"
+sudo su root -c "printf '[options] \n; This is the password that allows database operations:\n' >> /etc/${OE_CONFIG}.conf"
+if [ $GENERATE_RANDOM_PASSWORD = "True" ]; then
+    echo -e "* Generating random admin password"
     OE_SUPERADMIN=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)
 fi
-if [[ "$OE_VERSION" > "11.0" ]]; then
-    PORT_OPTION="http_port"
+sudo su root -c "printf 'admin_passwd = ${OE_SUPERADMIN}\n' >> /etc/${OE_CONFIG}.conf"
+if [ $OE_VERSION > "11.0" ];then
+    sudo su root -c "printf 'http_port = ${OE_PORT}\n' >> /etc/${OE_CONFIG}.conf"
 else
-    PORT_OPTION="xmlrpc_port"
+    sudo su root -c "printf 'xmlrpc_port = ${OE_PORT}\n' >> /etc/${OE_CONFIG}.conf"
 fi
-if [ "$INSTALL_NGINX" = "True" ]; then
-    PROXY_MODE="True"
+sudo su root -c "printf 'logfile = /var/log/${OE_USER}/${OE_CONFIG}.log\n' >> /etc/${OE_CONFIG}.conf"
+
+if [ $IS_ENTERPRISE = "True" ]; then
+    sudo su root -c "printf 'addons_path=${OE_HOME}/enterprise/addons,${OE_HOME_EXT}/addons\n' >> /etc/${OE_CONFIG}.conf"
 else
-    PROXY_MODE="False"
+    sudo su root -c "printf 'addons_path=${OE_HOME_EXT}/addons,${AXANTA_ADDONS_DIR}\n' >> /etc/${OE_CONFIG}.conf"
 fi
 
-AXANTA_ADDONS_DIR=$AXANTA_ADDONS_PATH,$AXANTA_ADDONS_PATH/oca_addons,$AXANTA_ADDONS_PATH/3rd_party_addons,$AXANTA_ADDONS_PATH/oca_reporting_addons,$AXANTA_ADDONS_PATH/tier_validation,$AXANTA_ADDONS_PATH/client_addons,$AXANTA_ADDONS_PATH/oca_operating_unit;
+sudo su root -c "printf 'workers = ${WORKERS}\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'max_cron_threads = 1\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_memory_hard = 24159191040000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_memory_soft = 20132659200000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_time_real = 3000000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_time_cpu = 3000000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_request = 999999\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'db_maxconn = 5\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'server_wide_modules = web,base_ext,letsencrypt\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'modules_auto_install_disabled = partner_autocomplete\n' >> /etc/${OE_CONFIG}.conf"
 
-sudo tee "/etc/${OE_CONFIG}.conf" > /dev/null <<EOF
-[options]
-; This is the password that allows database operations:
-admin_passwd = ${OE_SUPERADMIN}
-${PORT_OPTION} = ${OE_PORT}
-gevent_port = ${LONGPOLLING_PORT}
-proxy_mode = ${PROXY_MODE}
-logfile = /var/log/${OE_USER}/${OE_CONFIG}.log
-addons_path=${OE_HOME_EXT}/addons,${AXANTA_ADDONS_DIR}
-workers = 5
-max_cron_threads = 1
-limit_memory_hard = 24159191040000
-limit_memory_soft = 20132659200000
-limit_time_real = 3000000
-limit_time_cpu = 3000000
-limit_request = 999999
-db_maxconn = 5
-server_wide_modules = web,base_ext,letsencrypt
-modules_auto_install_disabled = partner_autocomplete
-EOF
+sudo chown $OE_USER:$OE_USER /etc/${OE_CONFIG}.conf
+sudo chmod 640 /etc/${OE_CONFIG}.conf
 
-sudo chown "$OE_USER:$OE_USER" "/etc/${OE_CONFIG}.conf"
-sudo chmod 640 "/etc/${OE_CONFIG}.conf"
-
-print_info "* Create startup file"
-sudo tee "$OE_HOME_EXT/start.sh" > /dev/null <<EOF
-#!/bin/sh
-sudo -u $OE_USER $ODOO_PYTHON_BIN $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf
-EOF
-sudo chmod 755 "$OE_HOME_EXT/start.sh"
+echo -e "* Create startup file"
+sudo su root -c "echo '#!/bin/sh' >> $OE_HOME_EXT/start.sh"
+sudo su root -c "echo 'sudo -u $OE_USER $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf' >> $OE_HOME_EXT/start.sh"
+sudo chmod 755 $OE_HOME_EXT/start.sh
 
 #--------------------------------------------------
 # Adding ODOO as a deamon (initscript)
 #--------------------------------------------------
 
-print_info "* Create init file"
+echo -e "* Create init file"
 cat <<EOF > ~/$OE_CONFIG
 #!/bin/sh
 ### BEGIN INIT INFO
@@ -339,7 +271,6 @@ cat <<EOF > ~/$OE_CONFIG
 # Description: ODOO Business Applications
 ### END INIT INFO
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
-PYTHON_BIN=$ODOO_PYTHON_BIN
 DAEMON=$OE_HOME_EXT/odoo-bin
 NAME=$OE_CONFIG
 DESC=$OE_CONFIG
@@ -351,8 +282,7 @@ CONFIGFILE="/etc/${OE_CONFIG}.conf"
 PIDFILE=/var/run/\${NAME}.pid
 # Additional options that are passed to the Daemon.
 DAEMON_OPTS="-c \$CONFIGFILE"
-[ -x \$PYTHON_BIN ] || exit 0
-[ -f \$DAEMON ] || exit 0
+[ -x \$DAEMON ] || exit 0
 [ -f \$CONFIGFILE ] || exit 0
 checkpid() {
 [ -f \$PIDFILE ] || return 1
@@ -365,7 +295,7 @@ start)
 echo -n "Starting \${DESC}: "
 start-stop-daemon --start --quiet --pidfile \$PIDFILE \
 --chuid \$USER --background --make-pidfile \
---exec \$PYTHON_BIN -- \$DAEMON \$DAEMON_OPTS
+--exec \$DAEMON -- \$DAEMON_OPTS
 echo "\${NAME}."
 ;;
 stop)
@@ -381,7 +311,7 @@ start-stop-daemon --stop --quiet --pidfile \$PIDFILE \
 sleep 1
 start-stop-daemon --start --quiet --pidfile \$PIDFILE \
 --chuid \$USER --background --make-pidfile \
---exec \$PYTHON_BIN -- \$DAEMON \$DAEMON_OPTS
+--exec \$DAEMON -- \$DAEMON_OPTS
 echo "\${NAME}."
 ;;
 *)
@@ -393,26 +323,21 @@ esac
 exit 0
 EOF
 
-print_info "* Security Init File"
-sudo mv ~/$OE_CONFIG "/etc/init.d/$OE_CONFIG"
-sudo chmod 755 "/etc/init.d/$OE_CONFIG"
-sudo chown root: "/etc/init.d/$OE_CONFIG"
+echo -e "* Security Init File"
+sudo mv ~/$OE_CONFIG /etc/init.d/$OE_CONFIG
+sudo chmod 755 /etc/init.d/$OE_CONFIG
+sudo chown root: /etc/init.d/$OE_CONFIG
 
-print_info "* Start ODOO on Startup"
-sudo update-rc.d "$OE_CONFIG" defaults
+echo -e "* Start ODOO on Startup"
+sudo update-rc.d $OE_CONFIG defaults
 
 #--------------------------------------------------
 # Install Nginx if needed
 #--------------------------------------------------
-if [ "$INSTALL_NGINX" = "True" ]; then
-  print_step "Installing and setting up Nginx"
-  sudo apt install nginx -y || exit 1
+if [ $INSTALL_NGINX = "True" ]; then
+  echo -e "\n---- Installing and setting up Nginx ----"
+  sudo apt install nginx -y
   cat <<EOF > ~/odoo
-map \$http_upgrade \$connection_upgrade {
-  default upgrade;
-  '' close;
-}
-
 server {
   listen 80;
 
@@ -466,18 +391,11 @@ server {
     proxy_redirect off;
   }
 
-  location /websocket {
+  location /longpolling {
     proxy_pass http://127.0.0.1:$LONGPOLLING_PORT;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade \$http_upgrade;
-    proxy_set_header Connection \$connection_upgrade;
-    proxy_set_header X-Forwarded-Host \$host;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    proxy_set_header X-Real-IP \$remote_addr;
   }
 
-  location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
+  location ~* .(js|css|png|jpg|jpeg|gif|ico)$ {
     expires 2d;
     proxy_pass http://127.0.0.1:$OE_PORT;
     add_header Cache-Control "public, no-transform";
@@ -494,56 +412,55 @@ server {
 }
 EOF
 
-  sudo mv ~/odoo "/etc/nginx/sites-available/$WEBSITE_NAME"
-  sudo ln -sf "/etc/nginx/sites-available/$WEBSITE_NAME" "/etc/nginx/sites-enabled/$WEBSITE_NAME"
-  sudo rm -f /etc/nginx/sites-enabled/default
-  sudo nginx -t || exit 1
-  sudo service nginx reload || exit 1
-  print_success "Done! The Nginx server is up and running. Configuration can be found at /etc/nginx/sites-available/$WEBSITE_NAME"
+  sudo mv ~/odoo /etc/nginx/sites-available/$WEBSITE_NAME
+  sudo ln -s /etc/nginx/sites-available/$WEBSITE_NAME /etc/nginx/sites-enabled/$WEBSITE_NAME
+  sudo rm /etc/nginx/sites-enabled/default
+  sudo service nginx reload
+  sudo su root -c "printf 'proxy_mode = True\n' >> /etc/${OE_CONFIG}.conf"
+  echo "Done! The Nginx server is up and running. Configuration can be found at /etc/nginx/sites-available/$WEBSITE_NAME"
 else
-  print_warning "Nginx isn't installed due to choice of the user!"
+  echo "Nginx isn't installed due to choice of the user!"
 fi
 
 #--------------------------------------------------
 # Enable ssl with certbot
 #--------------------------------------------------
 
-if [ "$INSTALL_NGINX" = "True" ] && [ "$ENABLE_SSL" = "True" ] && [ "$ADMIN_EMAIL" != "odoo@example.com" ]  && [ "$WEBSITE_NAME" != "_" ]; then
+if [ $INSTALL_NGINX = "True" ] && [ $ENABLE_SSL = "True" ] && [ $ADMIN_EMAIL != "odoo@example.com" ]  && [ $WEBSITE_NAME != "_" ];then
   sudo apt-get update -y
   sudo apt install snapd -y
-  sudo snap install core
-  sudo snap refresh core
+  sudo snap install core; snap refresh core
   sudo snap install --classic certbot
   sudo apt-get install python3-certbot-nginx -y
-  sudo certbot --nginx -d "$WEBSITE_NAME" --noninteractive --agree-tos --email "$ADMIN_EMAIL" --redirect
+  sudo certbot --nginx -d $WEBSITE_NAME --noninteractive --agree-tos --email $ADMIN_EMAIL --redirect
   sudo service nginx reload
-  print_success "SSL/HTTPS is enabled!"
+  echo "SSL/HTTPS is enabled!"
 else
-  print_warning "SSL/HTTPS isn't enabled due to choice of the user or because of a misconfiguration!"
-  if [ "$ADMIN_EMAIL" = "odoo@example.com" ]; then
-    print_error "Certbot does not support registering odoo@example.com. You should use real e-mail address."
+  echo "SSL/HTTPS isn't enabled due to choice of the user or because of a misconfiguration!"
+  if $ADMIN_EMAIL = "odoo@example.com";then 
+    echo "Certbot does not support registering odoo@example.com. You should use real e-mail address."
   fi
-  if [ "$WEBSITE_NAME" = "_" ]; then
-    print_error "Website name is set as _. Cannot obtain SSL Certificate for _. You should use real website address."
+  if $WEBSITE_NAME = "_";then
+    echo "Website name is set as _. Cannot obtain SSL Certificate for _. You should use real website address."
   fi
 fi
 
-print_info "* Starting Odoo Service"
-sudo service "$OE_CONFIG" start || exit 1
-print_success "-----------------------------------------------------------"
-print_success "Done! The Odoo server is up and running. Specifications:"
-print_info "Port: $OE_PORT"
-print_info "User service: $OE_USER"
-print_info "Configuration file location: /etc/${OE_CONFIG}.conf"
-print_info "Logfile location: /var/log/${OE_USER}/${OE_CONFIG}.log"
-print_info "User PostgreSQL: $OE_USER"
-print_info "Code location: $OE_USER"
-print_info "Addons folder: $OE_USER/$OE_CONFIG/addons/"
-print_info "Password superadmin (database): $OE_SUPERADMIN"
-print_info "Start Odoo service: sudo service $OE_CONFIG start"
-print_info "Stop Odoo service: sudo service $OE_CONFIG stop"
-print_info "Restart Odoo service: sudo service $OE_CONFIG restart"
-if [ "$INSTALL_NGINX" = "True" ]; then
-  print_info "Nginx configuration file: /etc/nginx/sites-available/$WEBSITE_NAME"
+echo -e "* Starting Odoo Service"
+sudo su root -c "/etc/init.d/$OE_CONFIG start"
+echo "-----------------------------------------------------------"
+echo "Done! The Odoo server is up and running. Specifications:"
+echo "Port: $OE_PORT"
+echo "User service: $OE_USER"
+echo "Configuraton file location: /etc/${OE_CONFIG}.conf"
+echo "Logfile location: /var/log/$OE_USER"
+echo "User PostgreSQL: $OE_USER"
+echo "Code location: $OE_USER"
+echo "Addons folder: $OE_USER/$OE_CONFIG/addons/"
+echo "Password superadmin (database): $OE_SUPERADMIN"
+echo "Start Odoo service: sudo service $OE_CONFIG start"
+echo "Stop Odoo service: sudo service $OE_CONFIG stop"
+echo "Restart Odoo service: sudo service $OE_CONFIG restart"
+if [ $INSTALL_NGINX = "True" ]; then
+  echo "Nginx configuration file: /etc/nginx/sites-available/$WEBSITE_NAME"
 fi
-print_success "-----------------------------------------------------------"
+echo "-----------------------------------------------------------"
