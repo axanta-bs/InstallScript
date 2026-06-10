@@ -44,6 +44,29 @@ LONGPOLLING_PORT="8072"
 ENABLE_SSL="True"
 # Provide Email to register ssl certificate
 ADMIN_EMAIL="odoo@example.com"
+
+AXANTA_REPO=https://github.com/burhanghee/ax-addons-16.git
+AXANTA_BRANCH=16.0
+AXANTA_ADDONS_PATH=$OE_HOME_EXT/ax-addons-16
+
+
+#--------------------------------------------------
+# Define color variables
+#--------------------------------------------------
+NC='\e[0m';
+REDC='\e[31m';
+GREENC='\e[32m';
+YELLOWC='\e[33m';
+BLUEC='\e[34m';
+LBLUEC='\e[94m';
+
+if [[ $UID != 0 ]]; then
+    echo -e "${REDC}ERROR${NC}";
+    echo -e "${YELLOWC}Please run this script as root or with sudo:${NC}"
+    echo -e "${BLUEC}sudo $0 $* ${NC}"
+    exit 1
+fi
+
 ##
 ###  WKHTMLTOPDF download links
 ## === Ubuntu Trusty x64 & x32 === (for other distributions please replace these two links,
@@ -150,35 +173,20 @@ sudo chown $OE_USER:$OE_USER /var/log/$OE_USER
 echo -e "\n==== Installing ODOO Server ===="
 sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/odoo $OE_HOME_EXT/
 
-if [ $IS_ENTERPRISE = "True" ]; then
-    # Odoo Enterprise install!
-    sudo pip3 install psycopg2-binary pdfminer.six
-    echo -e "\n--- Create symlink for node"
-    sudo ln -s /usr/bin/nodejs /usr/bin/node
-    sudo su $OE_USER -c "mkdir $OE_HOME/enterprise"
-    sudo su $OE_USER -c "mkdir $OE_HOME/enterprise/addons"
-
-    GITHUB_RESPONSE=$(sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/enterprise "$OE_HOME/enterprise/addons" 2>&1)
-    while [[ $GITHUB_RESPONSE == *"Authentication"* ]]; do
-        echo "------------------------WARNING------------------------------"
-        echo "Your authentication with Github has failed! Please try again."
-        printf "In order to clone and install the Odoo enterprise version you \nneed to be an offical Odoo partner and you need access to\nhttp://github.com/odoo/enterprise.\n"
-        echo "TIP: Press ctrl+c to stop this script."
-        echo "-------------------------------------------------------------"
-        echo " "
-        GITHUB_RESPONSE=$(sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/enterprise "$OE_HOME/enterprise/addons" 2>&1)
-    done
-
-    echo -e "\n---- Added Enterprise code under $OE_HOME/enterprise/addons ----"
-    echo -e "\n---- Installing Enterprise specific libraries ----"
-    sudo -H pip3 install num2words ofxparse dbfread ebaysdk firebase_admin pyOpenSSL
-    sudo npm install -g less
-    sudo npm install -g less-plugin-clean-css
+echo -e "\n---- Installing Axanta Addons ----"
+if [ ! -d $AXANTA_ADDONS_PATH ]; then
+    git clone --depth 1 --branch $AXANTA_BRANCH $AXANTA_REPO $AXANTA_ADDONS_PATH
+else
+    echo -e "\n${YELLOWC}Axanta already exists. Updating the repo...${NC}\n";
+    cd $AXANTA_ADDONS_PATH
+    git checkout $AXANTA_BRANCH
+    git pull origin $AXANTA_BRANCH
+    cd $WORKDIR
+    echo -e "\n${GREENC}Axanta Repo Updated!${NC}\n";
 fi
 
-echo -e "\n---- Create custom module directory ----"
-sudo su $OE_USER -c "mkdir $OE_HOME/custom"
-sudo su $OE_USER -c "mkdir $OE_HOME/custom/addons"
+sudo -H pip3 install -r $AXANTA_ADDONS_PATH/requirements.txt
+
 
 echo -e "\n---- Setting permissions on home folder ----"
 sudo chown -R $OE_USER:$OE_USER $OE_HOME/*
@@ -201,11 +209,20 @@ else
 fi
 sudo su root -c "printf 'logfile = /var/log/${OE_USER}/${OE_CONFIG}.log\n' >> /etc/${OE_CONFIG}.conf"
 
-if [ $IS_ENTERPRISE = "True" ]; then
-    sudo su root -c "printf 'addons_path=${OE_HOME}/enterprise/addons,${OE_HOME_EXT}/addons\n' >> /etc/${OE_CONFIG}.conf"
-else
-    sudo su root -c "printf 'addons_path=${OE_HOME_EXT}/addons,${OE_HOME}/custom/addons\n' >> /etc/${OE_CONFIG}.conf"
-fi
+AXANTA_ADDONS_DIR=$AXANTA_ADDONS_PATH,$AXANTA_ADDONS_PATH/oca_addons,$AXANTA_ADDONS_PATH/3rd_party_addons,$AXANTA_ADDONS_PATH/oca_reporting_addons,$AXANTA_ADDONS_PATH/tier_validation,$AXANTA_ADDONS_PATH/client_addons,$AXANTA_ADDONS_PATH/oca_operating_unit;
+
+sudo su root -c "printf 'addons_path=${OE_HOME_EXT}/addons,${AXANTA_ADDONS_DIR}\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'workers = 2\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'max_cron_threads = 1\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_memory_hard = 24159191040000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_memory_soft = 20132659200000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_time_real = 3000000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_time_cpu = 3000000\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'limit_request = 999999\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'db_maxconn = 5\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'server_wide_modules = web,base_ext,letsencrypt\n' >> /etc/${OE_CONFIG}.conf"
+sudo su root -c "printf 'modules_auto_install_disabled = partner_autocomplete\n' >> /etc/${OE_CONFIG}.conf"
+
 sudo chown $OE_USER:$OE_USER /etc/${OE_CONFIG}.conf
 sudo chmod 640 /etc/${OE_CONFIG}.conf
 
