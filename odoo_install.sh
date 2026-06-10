@@ -36,6 +36,7 @@ OE_SUPERADMIN="admin"
 # Set to "True" to generate a random password, "False" to use the variable in OE_SUPERADMIN
 GENERATE_RANDOM_PASSWORD="True"
 OE_CONFIG="${OE_USER}-server"
+WORKDIR="$(pwd)"
 # Set the website name
 WEBSITE_NAME="_"
 # Set the default Odoo longpolling port (you still have to use -c /etc/odoo-server.conf for example to use this.)
@@ -48,6 +49,13 @@ ADMIN_EMAIL="odoo@example.com"
 AXANTA_REPO=https://github.com/burhanghee/ax-addons-16.git
 AXANTA_BRANCH=16.0
 AXANTA_ADDONS_PATH=$OE_HOME_EXT/ax-addons-16
+
+PYTHON_VERSION="3.10.12"
+PYTHON_SHORT_VERSION="${PYTHON_VERSION%.*}"
+PYTHON_BIN="/usr/local/bin/python${PYTHON_SHORT_VERSION}"
+ODOO_VENV="$OE_HOME_EXT/venv"
+ODOO_PYTHON_BIN="$ODOO_VENV/bin/python"
+ODOO_PIP_BIN="$ODOO_VENV/bin/pip"
 
 
 #--------------------------------------------------
@@ -80,6 +88,40 @@ print_error() {
     echo -e "${REDC}$1${NC}"
 }
 
+install_python_from_source() {
+    if [ -x "$PYTHON_BIN" ]; then
+        INSTALLED_VERSION=$("$PYTHON_BIN" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')
+        if [ "$INSTALLED_VERSION" = "$PYTHON_VERSION" ]; then
+            print_success "Python $PYTHON_VERSION is already installed at $PYTHON_BIN"
+            return
+        fi
+        print_warning "$PYTHON_BIN exists but is Python $INSTALLED_VERSION. Rebuilding Python $PYTHON_VERSION."
+    fi
+
+    PYTHON_TARBALL="Python-${PYTHON_VERSION}.tgz"
+    PYTHON_SOURCE_DIR="/tmp/Python-${PYTHON_VERSION}"
+
+    print_info "Downloading Python $PYTHON_VERSION source"
+    cd /tmp || exit 1
+    sudo rm -rf "$PYTHON_SOURCE_DIR" "$PYTHON_TARBALL"
+    wget -O "$PYTHON_TARBALL" "https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_TARBALL}" || exit 1
+    tar -xzf "$PYTHON_TARBALL" || exit 1
+
+    print_info "Building Python $PYTHON_VERSION"
+    cd "$PYTHON_SOURCE_DIR" || exit 1
+    ./configure --with-ensurepip=install || exit 1
+    make -j "$(nproc)" || exit 1
+    sudo make altinstall || exit 1
+    cd "$WORKDIR" || exit 1
+
+    INSTALLED_VERSION=$("$PYTHON_BIN" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')
+    if [ "$INSTALLED_VERSION" != "$PYTHON_VERSION" ]; then
+        print_error "Expected Python $PYTHON_VERSION, but $PYTHON_BIN reports $INSTALLED_VERSION"
+        exit 1
+    fi
+    print_success "Python $PYTHON_VERSION installed at $PYTHON_BIN"
+}
+
 ##
 ###  WKHTMLTOPDF download links
 ## === Ubuntu Trusty x64 & x32 === (for other distributions please replace these two links,
@@ -102,6 +144,8 @@ fi
 # Update Server
 #--------------------------------------------------
 print_step "Update Server"
+sudo apt-get update
+sudo apt-get install software-properties-common curl ca-certificates gnupg -y || exit 1
 # universe package is for Ubuntu 18.x
 sudo add-apt-repository universe -y
 # libpng12-0 dependency for wkhtmltopdf for older Ubuntu versions
@@ -132,12 +176,9 @@ sudo su - postgres -c "createuser -s $OE_USER" 2> /dev/null || true
 #--------------------------------------------------
 # Install Dependencies
 #--------------------------------------------------
-print_step "Installing Python 3 + pip3"
-sudo apt-get install python3 python3-pip -y
-sudo apt-get install git python3-cffi build-essential wget python3-dev python3-venv python3-wheel libxslt-dev libzip-dev libldap2-dev libsasl2-dev python3-setuptools node-less libpng-dev libjpeg-dev gdebi -y
-
-print_step "Install python packages/requirements"
-sudo -H pip3 install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt
+print_step "Installing Python ${PYTHON_VERSION} build dependencies"
+sudo apt-get install git build-essential make wget xz-utils tk-dev libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libncursesw5-dev libffi-dev liblzma-dev libxml2-dev libxmlsec1-dev llvm python3-cffi python3-dev python3-venv python3-wheel libxslt-dev libzip-dev libldap2-dev libsasl2-dev python3-setuptools node-less libpng-dev libjpeg-dev gdebi -y || exit 1
+install_python_from_source
 
 print_step "Installing nodeJS NPM and rtlcss for LTR support"
 sudo apt-get install nodejs npm -y
@@ -194,11 +235,21 @@ else
     cd $AXANTA_ADDONS_PATH
     git checkout $AXANTA_BRANCH
     git pull origin $AXANTA_BRANCH
-    cd $WORKDIR
+    cd "$WORKDIR"
     print_success "Axanta Repo Updated!"
 fi
 
-sudo -H pip3 install -r $AXANTA_ADDONS_PATH/requirements.txt
+print_step "Creating ODOO Python virtual environment"
+sudo "$PYTHON_BIN" -m venv "$ODOO_VENV" || exit 1
+sudo "$ODOO_PYTHON_BIN" -m pip install --upgrade pip setuptools wheel || exit 1
+
+print_step "Installing python packages/requirements"
+sudo "$ODOO_PIP_BIN" install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt || exit 1
+if [ -f "$AXANTA_ADDONS_PATH/requirements.txt" ]; then
+    sudo "$ODOO_PIP_BIN" install -r "$AXANTA_ADDONS_PATH/requirements.txt" || exit 1
+else
+    print_warning "No Axanta requirements.txt found at $AXANTA_ADDONS_PATH/requirements.txt"
+fi
 
 
 print_step "Setting permissions on home folder"
@@ -241,7 +292,7 @@ sudo chmod 640 /etc/${OE_CONFIG}.conf
 
 print_info "* Create startup file"
 sudo su root -c "echo '#!/bin/sh' >> $OE_HOME_EXT/start.sh"
-sudo su root -c "echo 'sudo -u $OE_USER $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf' >> $OE_HOME_EXT/start.sh"
+sudo su root -c "echo 'sudo -u $OE_USER $ODOO_PYTHON_BIN $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf' >> $OE_HOME_EXT/start.sh"
 sudo chmod 755 $OE_HOME_EXT/start.sh
 
 #--------------------------------------------------
@@ -263,6 +314,7 @@ cat <<EOF > ~/$OE_CONFIG
 # Description: ODOO Business Applications
 ### END INIT INFO
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
+PYTHON_BIN=$ODOO_PYTHON_BIN
 DAEMON=$OE_HOME_EXT/odoo-bin
 NAME=$OE_CONFIG
 DESC=$OE_CONFIG
@@ -274,7 +326,8 @@ CONFIGFILE="/etc/${OE_CONFIG}.conf"
 PIDFILE=/var/run/\${NAME}.pid
 # Additional options that are passed to the Daemon.
 DAEMON_OPTS="-c \$CONFIGFILE"
-[ -x \$DAEMON ] || exit 0
+[ -x \$PYTHON_BIN ] || exit 0
+[ -f \$DAEMON ] || exit 0
 [ -f \$CONFIGFILE ] || exit 0
 checkpid() {
 [ -f \$PIDFILE ] || return 1
@@ -287,7 +340,7 @@ start)
 echo -n "Starting \${DESC}: "
 start-stop-daemon --start --quiet --pidfile \$PIDFILE \
 --chuid \$USER --background --make-pidfile \
---exec \$DAEMON -- \$DAEMON_OPTS
+--exec \$PYTHON_BIN -- \$DAEMON \$DAEMON_OPTS
 echo "\${NAME}."
 ;;
 stop)
@@ -303,7 +356,7 @@ start-stop-daemon --stop --quiet --pidfile \$PIDFILE \
 sleep 1
 start-stop-daemon --start --quiet --pidfile \$PIDFILE \
 --chuid \$USER --background --make-pidfile \
---exec \$DAEMON -- \$DAEMON_OPTS
+--exec \$PYTHON_BIN -- \$DAEMON \$DAEMON_OPTS
 echo "\${NAME}."
 ;;
 *)
