@@ -244,7 +244,7 @@ sudo "$PYTHON_BIN" -m venv "$ODOO_VENV" || exit 1
 sudo "$ODOO_PYTHON_BIN" -m pip install --upgrade pip setuptools wheel || exit 1
 
 print_step "Installing python packages/requirements"
-sudo "$ODOO_PIP_BIN" install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt || exit 1
+# sudo "$ODOO_PIP_BIN" install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt || exit 1
 if [ -f "$AXANTA_ADDONS_PATH/requirements.txt" ]; then
     sudo "$ODOO_PIP_BIN" install -r "$AXANTA_ADDONS_PATH/requirements.txt" || exit 1
 else
