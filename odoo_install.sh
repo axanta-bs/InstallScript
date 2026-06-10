@@ -179,10 +179,10 @@ sudo apt-get install libpq-dev
 print_step "Install PostgreSQL Server"
 if [ "$INSTALL_POSTGRESQL_FOURTEEN" = "True" ]; then
     print_info "Installing PostgreSQL V14 due to the user's choice"
-    sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc|sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg || exit 1
-    sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' || exit 1
-    sudo apt-get update || exit 1
-    sudo apt-get install postgresql-14 -y || exit 1
+    sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc|sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg 
+    sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' 
+    sudo apt-get update 
+    sudo apt-get install postgresql-14 -y 
 else
     print_info "Installing the default PostgreSQL version based on Linux version"
     sudo apt-get install postgresql postgresql-server-dev-all -y || exit 1
@@ -205,7 +205,7 @@ sudo npm install -g rtlcss || exit 1
 
 if [ "$INSTALL_WKHTMLTOPDF" = "True" ]; then
   print_step "Install wkhtmltopdf"
-  #pick up correct one from x64 & x32 versions:
+  i#pick up correct one from x64 & x32 versions:
   if [ "`getconf LONG_BIT`" == "64" ];then
       _url=$WKHTMLTOX_X64
   else
