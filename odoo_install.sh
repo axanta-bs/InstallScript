@@ -13,9 +13,9 @@
 # Execute the script to install Odoo:
 # ./odoo-install
 ################################################################################
-
 OE_USER="axanta"
 OE_HOME="/$OE_USER"
+OE_VENV="$OE_HOME/venv"
 OE_HOME_EXT="/$OE_USER/${OE_USER}-server"
 # The default port where this Odoo instance will run under (provided you use the command -c in the terminal)
 # Set to true if you want to install it, false if you don't need it or have it already installed.
@@ -51,7 +51,7 @@ AXANTA_BRANCH=16.0
 AXANTA_ADDONS_PATH=$OE_HOME_EXT/ax-addons-16
 AXANTA_ADDONS_DIR=$AXANTA_ADDONS_PATH,$AXANTA_ADDONS_PATH/oca_addons,$AXANTA_ADDONS_PATH/3rd_party_addons,$AXANTA_ADDONS_PATH/oca_reporting_addons,$AXANTA_ADDONS_PATH/tier_validation,$AXANTA_ADDONS_PATH/client_addons,$AXANTA_ADDONS_PATH/oca_operating_unit;
 
-
+WORKDIR=`pwd`
 
 if [[ $UID != 0 ]]; then
     echo -e "${REDC}ERROR${NC}";
@@ -85,7 +85,6 @@ echo -e "\n---- Update Server ----"
 # universe package is for Ubuntu 18.x
 sudo add-apt-repository universe
 # libpng12-0 dependency for wkhtmltopdf for older Ubuntu versions
-sudo add-apt-repository "deb http://mirrors.kernel.org/ubuntu/ xenial main"
 sudo apt-get update
 sudo apt-get upgrade -y
 sudo apt-get install libpq-dev
@@ -110,17 +109,50 @@ echo -e "\n---- Creating the ODOO PostgreSQL User  ----"
 sudo su - postgres -c "createuser -s $OE_USER" 2> /dev/null || true
 
 #--------------------------------------------------
-# Install Dependencies
+# Install Python 3.10.12
 #--------------------------------------------------
-echo -e "\n--- Installing Python 3 + pip3 --"
-sudo apt install -y python3.10 python3.10-dev python3.10-venv python3-pip
-sudo apt-get install git python3-cffi build-essential wget python3-dev python3-venv python3-wheel libxslt-dev libzip-dev libldap2-dev libsasl2-dev python3-setuptools node-less libpng-dev libjpeg-dev gdebi -y
+echo -e "\n--- Installing Python 3.10.12 ---"
 
-# sudo -H pip3 install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt
+sudo apt-get update
+
+sudo apt-get install -y software-properties-common build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev libbz2-dev liblzma-dev wget
+
+cd /usr/src
+
+if [ ! -f Python-3.10.12.tgz ]; then
+    sudo wget https://www.python.org/ftp/python/3.10.12/Python-3.10.12.tgz
+fi
+
+sudo rm -rf Python-3.10.12
+sudo tar -xzf Python-3.10.12.tgz
+
+cd Python-3.10.12
+
+sudo ./configure --enable-optimizations
+sudo make -j$(nproc)
+sudo make altinstall
+
+python3.10 --version
+
+# Install pip for Python 3.10
+curl -sS https://bootstrap.pypa.io/get-pip.py | sudo python3.10
+
+pip3.10 --version
+
+sudo apt install -y build-essential gcc g++ libpq-dev libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev libffi-dev libssl-dev zlib1g-dev libjpeg-dev libpng-dev libfreetype6-dev libblas-dev liblapack-dev python3-dev
+
+cd $WORKDIR
+
+echo -e "\n---- Create Python Virtual Environment ----"
+
+python3.10 -m venv $OE_VENV
+
+$OE_VENV/bin/pip install --upgrade pip setuptools wheel
 
 echo -e "\n---- Installing nodeJS NPM and rtlcss for LTR support ----"
-sudo apt-get install nodejs npm -y
-sudo npm install -g rtlcss
+curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
+apt-get install -y nodejs
+npm install -g rtlcss
 
 #--------------------------------------------------
 # Install Wkhtmltopdf if needed
@@ -204,7 +236,7 @@ else
 fi
 
 echo -e "\n---- Install python packages/requirements ----"
-sudo -H pip3 install -r $AXANTA_ADDONS_PATH/requirements.txt
+sudo $OE_VENV/bin/pip install -r $AXANTA_ADDONS_PATH/requirements.txt
 
 echo -e "\n---- Setting permissions on home folder ----"
 sudo chown -R $OE_USER:$OE_USER $OE_HOME/*
@@ -249,7 +281,7 @@ sudo chmod 640 /etc/${OE_CONFIG}.conf
 
 echo -e "* Create startup file"
 sudo su root -c "echo '#!/bin/sh' >> $OE_HOME_EXT/start.sh"
-sudo su root -c "echo 'sudo -u $OE_USER $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf' >> $OE_HOME_EXT/start.sh"
+sudo su root -c "echo '$OE_VENV/bin/python $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf' >> $OE_HOME_EXT/start.sh"
 sudo chmod 755 $OE_HOME_EXT/start.sh
 
 #--------------------------------------------------
@@ -271,7 +303,7 @@ cat <<EOF > ~/$OE_CONFIG
 # Description: ODOO Business Applications
 ### END INIT INFO
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
-DAEMON=$OE_HOME_EXT/odoo-bin
+DAEMON=$OE_VENV/bin/python
 NAME=$OE_CONFIG
 DESC=$OE_CONFIG
 # Specify the user name (Default: odoo).
@@ -281,7 +313,7 @@ CONFIGFILE="/etc/${OE_CONFIG}.conf"
 # pidfile
 PIDFILE=/var/run/\${NAME}.pid
 # Additional options that are passed to the Daemon.
-DAEMON_OPTS="-c \$CONFIGFILE"
+DAEMON_OPTS="$OE_HOME_EXT/odoo-bin -c \$CONFIGFILE"
 [ -x \$DAEMON ] || exit 0
 [ -f \$CONFIGFILE ] || exit 0
 checkpid() {
@@ -293,25 +325,19 @@ return 1
 case "\${1}" in
 start)
 echo -n "Starting \${DESC}: "
-start-stop-daemon --start --quiet --pidfile \$PIDFILE \
---chuid \$USER --background --make-pidfile \
---exec \$DAEMON -- \$DAEMON_OPTS
+start-stop-daemon --start --quiet --pidfile \$PIDFILE --chuid \$USER --background --make-pidfile --exec \$DAEMON -- \$DAEMON_OPTS
 echo "\${NAME}."
 ;;
 stop)
 echo -n "Stopping \${DESC}: "
-start-stop-daemon --stop --quiet --pidfile \$PIDFILE \
---oknodo
+start-stop-daemon --stop --quiet --pidfile \$PIDFILE --oknodo
 echo "\${NAME}."
 ;;
 restart|force-reload)
 echo -n "Restarting \${DESC}: "
-start-stop-daemon --stop --quiet --pidfile \$PIDFILE \
---oknodo
+start-stop-daemon --stop --quiet --pidfile \$PIDFILE --oknodo
 sleep 1
-start-stop-daemon --start --quiet --pidfile \$PIDFILE \
---chuid \$USER --background --make-pidfile \
---exec \$DAEMON -- \$DAEMON_OPTS
+start-stop-daemon --start --quiet --pidfile \$PIDFILE --chuid \$USER --background --make-pidfile --exec \$DAEMON -- \$DAEMON_OPTS
 echo "\${NAME}."
 ;;
 *)
