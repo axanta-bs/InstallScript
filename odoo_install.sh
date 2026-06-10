@@ -56,17 +56,6 @@ PYTHON_BIN="/usr/local/bin/python${PYTHON_SHORT_VERSION}"
 ODOO_VENV="$OE_HOME_EXT/venv"
 ODOO_PYTHON_BIN="$ODOO_VENV/bin/python"
 ODOO_PIP_BIN="$ODOO_VENV/bin/pip"
-if command -v lsb_release >/dev/null 2>&1; then
-    UBUNTU_VERSION="$(lsb_release -r -s)"
-    UBUNTU_CODENAME="$(lsb_release -c -s)"
-elif [ -r /etc/os-release ]; then
-    . /etc/os-release
-    UBUNTU_VERSION="${VERSION_ID:-}"
-    UBUNTU_CODENAME="${VERSION_CODENAME:-}"
-else
-    UBUNTU_VERSION=""
-    UBUNTU_CODENAME=""
-fi
 
 
 #--------------------------------------------------
@@ -161,28 +150,28 @@ clone_or_update_repo() {
 ## https://github.com/odoo/odoo/wiki/Wkhtmltopdf ):
 ## https://www.odoo.com/documentation/16.0/administration/install.html
 
-# Ubuntu 22.04 installs wkhtmltopdf from apt. Older releases use wkhtmltox packages.
-if [[ "$UBUNTU_VERSION" != "22.04" ]]; then
+# Check if the operating system is Ubuntu 22.04
+if [[ $(lsb_release -r -s) == "22.04" ]]; then
+    WKHTMLTOX_X64="https://packages.ubuntu.com/jammy/wkhtmltopdf"
+    WKHTMLTOX_X32="https://packages.ubuntu.com/jammy/wkhtmltopdf"
+    #No Same link works for both 64 and 32-bit on Ubuntu 22.04
+else
     # For older versions of Ubuntu
-    WKHTMLTOX_X64="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.${UBUNTU_CODENAME}_amd64.deb"
-    WKHTMLTOX_X32="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.${UBUNTU_CODENAME}_i386.deb"
+    WKHTMLTOX_X64="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.$(lsb_release -c -s)_amd64.deb"
+    WKHTMLTOX_X32="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.$(lsb_release -c -s)_i386.deb"
 fi
 
 #--------------------------------------------------
 # Update Server
 #--------------------------------------------------
 print_step "Update Server"
-sudo apt-get update || exit 1
-sudo apt-get install software-properties-common curl ca-certificates gnupg -y || exit 1
 # universe package is for Ubuntu 18.x
-sudo add-apt-repository universe -y || exit 1
+sudo add-apt-repository universe
 # libpng12-0 dependency for wkhtmltopdf for older Ubuntu versions
-if [ "$INSTALL_WKHTMLTOPDF" = "True" ] && [[ "$UBUNTU_VERSION" != "22.04" ]]; then
-    sudo add-apt-repository "deb https://mirrors.kernel.org/ubuntu/ xenial main" -y || exit 1
-fi
-sudo apt-get update || exit 1
-sudo apt-get upgrade -y || exit 1
-sudo apt-get install libpq-dev -y || exit 1
+sudo add-apt-repository "deb http://mirrors.kernel.org/ubuntu/ xenial main"
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo apt-get install libpq-dev
 
 #--------------------------------------------------
 # Install PostgreSQL Server
@@ -216,21 +205,25 @@ sudo npm install -g rtlcss || exit 1
 
 if [ "$INSTALL_WKHTMLTOPDF" = "True" ]; then
   print_step "Install wkhtmltopdf"
-  if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
-    sudo apt-get install wkhtmltopdf -y || exit 1
+  #pick up correct one from x64 & x32 versions:
+  if [ "`getconf LONG_BIT`" == "64" ];then
+      _url=$WKHTMLTOX_X64
   else
-    # Pick up correct one from x64 & x32 versions.
-    if [ "$(getconf LONG_BIT)" = "64" ]; then
-        _url="$WKHTMLTOX_X64"
-    else
-        _url="$WKHTMLTOX_X32"
-    fi
-    _wkhtml_deb="/tmp/$(basename "$_url")"
-    wget -O "$_wkhtml_deb" "$_url" || exit 1
-    sudo gdebi --n "$_wkhtml_deb" || exit 1
-    sudo ln -sf /usr/local/bin/wkhtmltopdf /usr/bin/wkhtmltopdf
-    sudo ln -sf /usr/local/bin/wkhtmltoimage /usr/bin/wkhtmltoimage
+      _url=$WKHTMLTOX_X32
   fi
+  sudo wget $_url
+  
+
+  if [[ $(lsb_release -r -s) == "22.04" ]]; then
+    # Ubuntu 22.04 LTS
+    sudo apt install wkhtmltopdf -y
+  else
+      # For older versions of Ubuntu
+    sudo gdebi --n `basename $_url`
+  fi
+  
+  sudo ln -s /usr/local/bin/wkhtmltopdf /usr/bin
+  sudo ln -s /usr/local/bin/wkhtmltoimage /usr/bin
 else
   print_warning "Wkhtmltopdf isn't installed due to the choice of the user!"
 fi
