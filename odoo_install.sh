@@ -56,6 +56,17 @@ PYTHON_BIN="/usr/local/bin/python${PYTHON_SHORT_VERSION}"
 ODOO_VENV="$OE_HOME_EXT/venv"
 ODOO_PYTHON_BIN="$ODOO_VENV/bin/python"
 ODOO_PIP_BIN="$ODOO_VENV/bin/pip"
+if command -v lsb_release >/dev/null 2>&1; then
+    UBUNTU_VERSION="$(lsb_release -r -s)"
+    UBUNTU_CODENAME="$(lsb_release -c -s)"
+elif [ -r /etc/os-release ]; then
+    . /etc/os-release
+    UBUNTU_VERSION="${VERSION_ID:-}"
+    UBUNTU_CODENAME="${VERSION_CODENAME:-}"
+else
+    UBUNTU_VERSION=""
+    UBUNTU_CODENAME=""
+fi
 
 
 #--------------------------------------------------
@@ -122,6 +133,27 @@ install_python_from_source() {
     print_success "Python $PYTHON_VERSION installed at $PYTHON_BIN"
 }
 
+clone_or_update_repo() {
+    local repo_url="$1"
+    local branch="$2"
+    local target="$3"
+    local repo_name
+    repo_name="$(basename "$target")"
+
+    if [ -d "$target/.git" ]; then
+        print_warning "$repo_name already exists. Updating branch $branch..."
+        sudo -u "$OE_USER" git -C "$target" fetch --depth 1 origin "$branch" || exit 1
+        sudo -u "$OE_USER" git -C "$target" checkout "$branch" || exit 1
+        sudo -u "$OE_USER" git -C "$target" pull --ff-only origin "$branch" || exit 1
+        print_success "$repo_name updated."
+    elif [ -e "$target" ]; then
+        print_error "$target exists but is not a git repository. Move it away before running this script again."
+        exit 1
+    else
+        sudo -u "$OE_USER" git clone --depth 1 --branch "$branch" "$repo_url" "$target" || exit 1
+    fi
+}
+
 ##
 ###  WKHTMLTOPDF download links
 ## === Ubuntu Trusty x64 & x32 === (for other distributions please replace these two links,
@@ -129,30 +161,28 @@ install_python_from_source() {
 ## https://github.com/odoo/odoo/wiki/Wkhtmltopdf ):
 ## https://www.odoo.com/documentation/16.0/administration/install.html
 
-# Check if the operating system is Ubuntu 22.04
-if [[ $(lsb_release -r -s) == "22.04" ]]; then
-    WKHTMLTOX_X64="https://packages.ubuntu.com/jammy/wkhtmltopdf"
-    WKHTMLTOX_X32="https://packages.ubuntu.com/jammy/wkhtmltopdf"
-    #No Same link works for both 64 and 32-bit on Ubuntu 22.04
-else
+# Ubuntu 22.04 installs wkhtmltopdf from apt. Older releases use wkhtmltox packages.
+if [[ "$UBUNTU_VERSION" != "22.04" ]]; then
     # For older versions of Ubuntu
-    WKHTMLTOX_X64="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.$(lsb_release -c -s)_amd64.deb"
-    WKHTMLTOX_X32="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.$(lsb_release -c -s)_i386.deb"
+    WKHTMLTOX_X64="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.${UBUNTU_CODENAME}_amd64.deb"
+    WKHTMLTOX_X32="https://github.com/wkhtmltopdf/wkhtmltopdf/releases/download/0.12.5/wkhtmltox_0.12.5-1.${UBUNTU_CODENAME}_i386.deb"
 fi
 
 #--------------------------------------------------
 # Update Server
 #--------------------------------------------------
 print_step "Update Server"
-sudo apt-get update
+sudo apt-get update || exit 1
 sudo apt-get install software-properties-common curl ca-certificates gnupg -y || exit 1
 # universe package is for Ubuntu 18.x
-sudo add-apt-repository universe -y
+sudo add-apt-repository universe -y || exit 1
 # libpng12-0 dependency for wkhtmltopdf for older Ubuntu versions
-sudo add-apt-repository "deb http://mirrors.kernel.org/ubuntu/ xenial main" -y
-sudo apt-get update
-sudo apt-get upgrade -y
-sudo apt-get install libpq-dev -y
+if [ "$INSTALL_WKHTMLTOPDF" = "True" ] && [[ "$UBUNTU_VERSION" != "22.04" ]]; then
+    sudo add-apt-repository "deb http://mirrors.kernel.org/ubuntu/ xenial main" -y || exit 1
+fi
+sudo apt-get update || exit 1
+sudo apt-get upgrade -y || exit 1
+sudo apt-get install libpq-dev -y || exit 1
 
 #--------------------------------------------------
 # Install PostgreSQL Server
@@ -160,13 +190,13 @@ sudo apt-get install libpq-dev -y
 print_step "Install PostgreSQL Server"
 if [ "$INSTALL_POSTGRESQL_FOURTEEN" = "True" ]; then
     print_info "Installing PostgreSQL V14 due to the user's choice"
-    sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc|sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
-    sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-    sudo apt-get update
-    sudo apt-get install postgresql-14 -y
+    sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc|sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg || exit 1
+    sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list' || exit 1
+    sudo apt-get update || exit 1
+    sudo apt-get install postgresql-14 -y || exit 1
 else
     print_info "Installing the default PostgreSQL version based on Linux version"
-    sudo apt-get install postgresql postgresql-server-dev-all -y
+    sudo apt-get install postgresql postgresql-server-dev-all -y || exit 1
 fi
 
 
@@ -181,119 +211,121 @@ sudo apt-get install git build-essential make wget xz-utils tk-dev libssl-dev zl
 install_python_from_source
 
 print_step "Installing nodeJS NPM and rtlcss for LTR support"
-sudo apt-get install nodejs npm -y
-sudo npm install -g rtlcss
+sudo apt-get install nodejs npm -y || exit 1
+sudo npm install -g rtlcss || exit 1
 
-#--------------------------------------------------
-# Install Wkhtmltopdf if needed
-#--------------------------------------------------
 if [ "$INSTALL_WKHTMLTOPDF" = "True" ]; then
-  print_step "Install wkhtml and place shortcuts on correct place for ODOO"
-  #pick up correct one from x64 & x32 versions:
-  if [ "`getconf LONG_BIT`" == "64" ];then
-      _url=$WKHTMLTOX_X64
+  print_step "Install wkhtmltopdf"
+  if [[ "$UBUNTU_VERSION" == "22.04" ]]; then
+    sudo apt-get install wkhtmltopdf -y || exit 1
   else
-      _url=$WKHTMLTOX_X32
+    # Pick up correct one from x64 & x32 versions.
+    if [ "$(getconf LONG_BIT)" = "64" ]; then
+        _url="$WKHTMLTOX_X64"
+    else
+        _url="$WKHTMLTOX_X32"
+    fi
+    _wkhtml_deb="/tmp/$(basename "$_url")"
+    wget -O "$_wkhtml_deb" "$_url" || exit 1
+    sudo gdebi --n "$_wkhtml_deb" || exit 1
+    sudo ln -sf /usr/local/bin/wkhtmltopdf /usr/bin/wkhtmltopdf
+    sudo ln -sf /usr/local/bin/wkhtmltoimage /usr/bin/wkhtmltoimage
   fi
-  sudo wget $_url
-  
-
-  if [[ $(lsb_release -r -s) == "22.04" ]]; then
-    # Ubuntu 22.04 LTS
-    sudo apt install wkhtmltopdf -y
-  else
-      # For older versions of Ubuntu
-    sudo gdebi --n `basename $_url`
-  fi
-  
-  sudo ln -s /usr/local/bin/wkhtmltopdf /usr/bin
-  sudo ln -s /usr/local/bin/wkhtmltoimage /usr/bin
 else
   print_warning "Wkhtmltopdf isn't installed due to the choice of the user!"
 fi
 
 print_step "Create ODOO system user"
-sudo adduser --system --quiet --shell=/bin/bash --home=$OE_HOME --gecos 'ODOO' --group $OE_USER
+if id "$OE_USER" >/dev/null 2>&1; then
+    print_warning "User $OE_USER already exists."
+else
+    sudo adduser --system --quiet --shell=/bin/bash --home="$OE_HOME" --gecos 'ODOO' --group "$OE_USER"
+fi
 #The user should also be added to the sudo'ers group.
-sudo adduser $OE_USER sudo
+sudo adduser "$OE_USER" sudo
 
 print_step "Create Log directory"
-sudo mkdir /var/log/$OE_USER
-sudo chown $OE_USER:$OE_USER /var/log/$OE_USER
+sudo mkdir -p "$OE_HOME"
+sudo mkdir -p "/var/log/$OE_USER"
+sudo chown "$OE_USER:$OE_USER" "/var/log/$OE_USER"
+sudo chown -R "$OE_USER:$OE_USER" "$OE_HOME"
 
 #--------------------------------------------------
 # Install ODOO
 #--------------------------------------------------
 print_step "Installing ODOO Server"
-sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/odoo $OE_HOME_EXT/
+clone_or_update_repo "https://www.github.com/odoo/odoo" "$OE_VERSION" "$OE_HOME_EXT"
 
 print_step "Installing Axanta Addons"
-if [ ! -d $AXANTA_ADDONS_PATH ]; then
-    git clone --depth 1 --branch $AXANTA_BRANCH $AXANTA_REPO $AXANTA_ADDONS_PATH
-else
-    print_warning "Axanta already exists. Updating the repo..."
-    cd $AXANTA_ADDONS_PATH
-    git checkout $AXANTA_BRANCH
-    git pull origin $AXANTA_BRANCH
-    cd "$WORKDIR"
-    print_success "Axanta Repo Updated!"
-fi
+clone_or_update_repo "$AXANTA_REPO" "$AXANTA_BRANCH" "$AXANTA_ADDONS_PATH"
 
 print_step "Creating ODOO Python virtual environment"
 sudo "$PYTHON_BIN" -m venv "$ODOO_VENV" || exit 1
 sudo "$ODOO_PYTHON_BIN" -m pip install --upgrade pip setuptools wheel || exit 1
 
 print_step "Installing python packages/requirements"
-# sudo "$ODOO_PIP_BIN" install -r https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt || exit 1
+sudo "$ODOO_PYTHON_BIN" -m pip install -r "https://github.com/odoo/odoo/raw/${OE_VERSION}/requirements.txt" || exit 1
 if [ -f "$AXANTA_ADDONS_PATH/requirements.txt" ]; then
-    sudo "$ODOO_PIP_BIN" install -r "$AXANTA_ADDONS_PATH/requirements.txt" || exit 1
+    sudo "$ODOO_PYTHON_BIN" -m pip install -r "$AXANTA_ADDONS_PATH/requirements.txt" || exit 1
 else
     print_warning "No Axanta requirements.txt found at $AXANTA_ADDONS_PATH/requirements.txt"
 fi
 
 
 print_step "Setting permissions on home folder"
-sudo chown -R $OE_USER:$OE_USER $OE_HOME/*
+sudo chown -R "$OE_USER:$OE_USER" "$OE_HOME"
 
 print_info "* Create server config file"
 
 
-sudo touch /etc/${OE_CONFIG}.conf
 print_info "* Creating server config file"
-sudo su root -c "printf '[options] \n; This is the password that allows database operations:\n' >> /etc/${OE_CONFIG}.conf"
 if [ "$GENERATE_RANDOM_PASSWORD" = "True" ]; then
     print_info "* Generating random admin password"
     OE_SUPERADMIN=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)
 fi
-sudo su root -c "printf 'admin_passwd = ${OE_SUPERADMIN}\n' >> /etc/${OE_CONFIG}.conf"
 if [[ "$OE_VERSION" > "11.0" ]]; then
-    sudo su root -c "printf 'http_port = ${OE_PORT}\n' >> /etc/${OE_CONFIG}.conf"
+    PORT_OPTION="http_port"
 else
-    sudo su root -c "printf 'xmlrpc_port = ${OE_PORT}\n' >> /etc/${OE_CONFIG}.conf"
+    PORT_OPTION="xmlrpc_port"
 fi
-sudo su root -c "printf 'logfile = /var/log/${OE_USER}/${OE_CONFIG}.log\n' >> /etc/${OE_CONFIG}.conf"
+if [ "$INSTALL_NGINX" = "True" ]; then
+    PROXY_MODE="True"
+else
+    PROXY_MODE="False"
+fi
 
 AXANTA_ADDONS_DIR=$AXANTA_ADDONS_PATH,$AXANTA_ADDONS_PATH/oca_addons,$AXANTA_ADDONS_PATH/3rd_party_addons,$AXANTA_ADDONS_PATH/oca_reporting_addons,$AXANTA_ADDONS_PATH/tier_validation,$AXANTA_ADDONS_PATH/client_addons,$AXANTA_ADDONS_PATH/oca_operating_unit;
 
-sudo su root -c "printf 'addons_path=${OE_HOME_EXT}/addons,${AXANTA_ADDONS_DIR}\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'workers = 5\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'max_cron_threads = 1\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'limit_memory_hard = 24159191040000\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'limit_memory_soft = 20132659200000\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'limit_time_real = 3000000\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'limit_time_cpu = 3000000\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'limit_request = 999999\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'db_maxconn = 5\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'server_wide_modules = web,base_ext,letsencrypt\n' >> /etc/${OE_CONFIG}.conf"
-sudo su root -c "printf 'modules_auto_install_disabled = partner_autocomplete\n' >> /etc/${OE_CONFIG}.conf"
+sudo tee "/etc/${OE_CONFIG}.conf" > /dev/null <<EOF
+[options]
+; This is the password that allows database operations:
+admin_passwd = ${OE_SUPERADMIN}
+${PORT_OPTION} = ${OE_PORT}
+gevent_port = ${LONGPOLLING_PORT}
+proxy_mode = ${PROXY_MODE}
+logfile = /var/log/${OE_USER}/${OE_CONFIG}.log
+addons_path=${OE_HOME_EXT}/addons,${AXANTA_ADDONS_DIR}
+workers = 5
+max_cron_threads = 1
+limit_memory_hard = 24159191040000
+limit_memory_soft = 20132659200000
+limit_time_real = 3000000
+limit_time_cpu = 3000000
+limit_request = 999999
+db_maxconn = 5
+server_wide_modules = web,base_ext,letsencrypt
+modules_auto_install_disabled = partner_autocomplete
+EOF
 
-sudo chown $OE_USER:$OE_USER /etc/${OE_CONFIG}.conf
-sudo chmod 640 /etc/${OE_CONFIG}.conf
+sudo chown "$OE_USER:$OE_USER" "/etc/${OE_CONFIG}.conf"
+sudo chmod 640 "/etc/${OE_CONFIG}.conf"
 
 print_info "* Create startup file"
-sudo su root -c "echo '#!/bin/sh' >> $OE_HOME_EXT/start.sh"
-sudo su root -c "echo 'sudo -u $OE_USER $ODOO_PYTHON_BIN $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf' >> $OE_HOME_EXT/start.sh"
-sudo chmod 755 $OE_HOME_EXT/start.sh
+sudo tee "$OE_HOME_EXT/start.sh" > /dev/null <<EOF
+#!/bin/sh
+sudo -u $OE_USER $ODOO_PYTHON_BIN $OE_HOME_EXT/odoo-bin --config=/etc/${OE_CONFIG}.conf
+EOF
+sudo chmod 755 "$OE_HOME_EXT/start.sh"
 
 #--------------------------------------------------
 # Adding ODOO as a deamon (initscript)
@@ -369,20 +401,25 @@ exit 0
 EOF
 
 print_info "* Security Init File"
-sudo mv ~/$OE_CONFIG /etc/init.d/$OE_CONFIG
-sudo chmod 755 /etc/init.d/$OE_CONFIG
-sudo chown root: /etc/init.d/$OE_CONFIG
+sudo mv ~/$OE_CONFIG "/etc/init.d/$OE_CONFIG"
+sudo chmod 755 "/etc/init.d/$OE_CONFIG"
+sudo chown root: "/etc/init.d/$OE_CONFIG"
 
 print_info "* Start ODOO on Startup"
-sudo update-rc.d $OE_CONFIG defaults
+sudo update-rc.d "$OE_CONFIG" defaults
 
 #--------------------------------------------------
 # Install Nginx if needed
 #--------------------------------------------------
 if [ "$INSTALL_NGINX" = "True" ]; then
   print_step "Installing and setting up Nginx"
-  sudo apt install nginx -y
+  sudo apt install nginx -y || exit 1
   cat <<EOF > ~/odoo
+map \$http_upgrade \$connection_upgrade {
+  default upgrade;
+  '' close;
+}
+
 server {
   listen 80;
 
@@ -436,11 +473,18 @@ server {
     proxy_redirect off;
   }
 
-  location /longpolling {
+  location /websocket {
     proxy_pass http://127.0.0.1:$LONGPOLLING_PORT;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection \$connection_upgrade;
+    proxy_set_header X-Forwarded-Host \$host;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Real-IP \$remote_addr;
   }
 
-  location ~* .(js|css|png|jpg|jpeg|gif|ico)$ {
+  location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
     expires 2d;
     proxy_pass http://127.0.0.1:$OE_PORT;
     add_header Cache-Control "public, no-transform";
@@ -457,11 +501,11 @@ server {
 }
 EOF
 
-  sudo mv ~/odoo /etc/nginx/sites-available/$WEBSITE_NAME
-  sudo ln -s /etc/nginx/sites-available/$WEBSITE_NAME /etc/nginx/sites-enabled/$WEBSITE_NAME
-  sudo rm /etc/nginx/sites-enabled/default
-  sudo service nginx reload
-  sudo su root -c "printf 'proxy_mode = True\n' >> /etc/${OE_CONFIG}.conf"
+  sudo mv ~/odoo "/etc/nginx/sites-available/$WEBSITE_NAME"
+  sudo ln -sf "/etc/nginx/sites-available/$WEBSITE_NAME" "/etc/nginx/sites-enabled/$WEBSITE_NAME"
+  sudo rm -f /etc/nginx/sites-enabled/default
+  sudo nginx -t || exit 1
+  sudo service nginx reload || exit 1
   print_success "Done! The Nginx server is up and running. Configuration can be found at /etc/nginx/sites-available/$WEBSITE_NAME"
 else
   print_warning "Nginx isn't installed due to choice of the user!"
@@ -474,10 +518,11 @@ fi
 if [ "$INSTALL_NGINX" = "True" ] && [ "$ENABLE_SSL" = "True" ] && [ "$ADMIN_EMAIL" != "odoo@example.com" ]  && [ "$WEBSITE_NAME" != "_" ]; then
   sudo apt-get update -y
   sudo apt install snapd -y
-  sudo snap install core; snap refresh core
+  sudo snap install core
+  sudo snap refresh core
   sudo snap install --classic certbot
   sudo apt-get install python3-certbot-nginx -y
-  sudo certbot --nginx -d $WEBSITE_NAME --noninteractive --agree-tos --email $ADMIN_EMAIL --redirect
+  sudo certbot --nginx -d "$WEBSITE_NAME" --noninteractive --agree-tos --email "$ADMIN_EMAIL" --redirect
   sudo service nginx reload
   print_success "SSL/HTTPS is enabled!"
 else
@@ -491,13 +536,13 @@ else
 fi
 
 print_info "* Starting Odoo Service"
-sudo su root -c "/etc/init.d/$OE_CONFIG start"
+sudo service "$OE_CONFIG" start || exit 1
 print_success "-----------------------------------------------------------"
 print_success "Done! The Odoo server is up and running. Specifications:"
 print_info "Port: $OE_PORT"
 print_info "User service: $OE_USER"
 print_info "Configuration file location: /etc/${OE_CONFIG}.conf"
-print_info "Logfile location: /var/log/$OE_USER"
+print_info "Logfile location: /var/log/${OE_USER}/${OE_CONFIG}.log"
 print_info "User PostgreSQL: $OE_USER"
 print_info "Code location: $OE_USER"
 print_info "Addons folder: $OE_USER/$OE_CONFIG/addons/"
