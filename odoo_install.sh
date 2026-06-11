@@ -231,7 +231,7 @@ fi
 #--------------------------------------------------
 echo -e "\n---- Installing Axanta Addons ----"
 if [ ! -d $AXANTA_ADDONS_PATH ]; then
-    git clone --depth 1 --branch $AXANTA_BRANCH $AXANTA_REPO $AXANTA_ADDONS_PATH
+    git clone --branch $AXANTA_BRANCH $AXANTA_REPO $AXANTA_ADDONS_PATH
 else
     echo -e "\nAxanta already exists. Updating the repo...\n";
     cd $AXANTA_ADDONS_PATH
