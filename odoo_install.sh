@@ -160,9 +160,8 @@ if [ $INSTALL_WKHTMLTOPDF = "True" ]; then
       _url=$WKHTMLTOX_X32
   fi
   sudo wget $_url
-  
 
-  if [[ $(lsb_release -r -s) == "22.04" ]]; then
+  else if [[ $(lsb_release -r -s) == "24.04" ]] || [[ $(lsb_release -r -s) == "22.04" ]]; then
     # Ubuntu 22.04 LTS
     sudo apt install wkhtmltopdf -y
   else
@@ -189,7 +188,16 @@ sudo chown $OE_USER:$OE_USER /var/log/$OE_USER
 # Install ODOO
 #--------------------------------------------------
 echo -e "\n==== Installing ODOO Server ===="
-sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/odoo $OE_HOME_EXT/
+if [ ! -d $OE_HOME_EXT ]; then
+  sudo git clone --depth 1 --branch $OE_VERSION https://www.github.com/odoo/odoo $OE_HOME_EXT/
+else
+  echo -e "\nODOO already exists. Updating the repo...\n";
+  cd $OE_HOME_EXT
+  git checkout $OE_VERSION
+  git pull origin $OE_VERSION
+  cd $WORKDIR
+  echo -e "\nODOO Repo Updated!\n";
+fi
 
 if [ $IS_ENTERPRISE = "True" ]; then
     # Odoo Enterprise install!
@@ -217,6 +225,10 @@ if [ $IS_ENTERPRISE = "True" ]; then
     sudo npm install -g less-plugin-clean-css
 fi
 
+
+#--------------------------------------------------
+# Install AXANTA ADDONS
+#--------------------------------------------------
 echo -e "\n---- Installing Axanta Addons ----"
 if [ ! -d $AXANTA_ADDONS_PATH ]; then
     git clone --depth 1 --branch $AXANTA_BRANCH $AXANTA_REPO $AXANTA_ADDONS_PATH
@@ -236,8 +248,8 @@ python3.10 -m venv $OE_VENV
 $OE_VENV/bin/pip install --upgrade pip setuptools wheel
 
 echo -e "\n---- Install python packages/requirements ----"
-# sudo $OE_VENV/bin/pip install -r $AXANTA_ADDONS_PATH/requirements.txt
-$OE_VENV/bin/pip install pip==24.0 setuptools==65.5.0 wheel==0.38.4 Babel==2.9.1 chardet==4.0.0 cryptography==3.4.8 decorator==4.4.2 docutils==0.16 ebaysdk==2.1.5 freezegun==0.3.15 "gevent>=22.10.2" idna==2.10 Jinja2==2.11.3 libsass==0.20.1 lxml==4.6.5 MarkupSafe==1.1.1 num2words==0.5.9 ofxparse==0.21 passlib==1.7.4 Pillow==9.0.1 polib==1.1.0 psutil==5.8.0 psycopg2==2.9.2 pydot==1.4.2 pyOpenSSL==20.0.1 PyPDF2==1.26.0 pyserial==3.5 python-ldap==3.4.0 python-stdnum==1.16 pytz pyusb==1.0.2 qrcode==6.1 reportlab==3.5.59 requests==2.25.1 urllib3==1.26.5 vobject==0.9.6.1 Werkzeug==2.0.2 xlrd==1.2.0 XlsxWriter==1.1.2 xlwt==1.3.0 zeep==4.0.0 acme==2.10.0 astor==0.8.1 beautifulsoup4==4.12.3 boto3==1.34.113 dnspython==2.6.1 docx-mailmerge==0.5.0 geopy==2.4.1 google-auth==2.29.0 html2docx==1.6.0 josepy==1.14.0 mysql-connector==2.2.9 numpy==1.24.4 oauthlib==3.2.2 openpyxl==3.1.2 openupgradelib==3.3.0 pandas==2.0.3 paramiko==3.4.0 pybase64==1.2.0 pyfcm==1.5.4 python-docx==0.8.11 rsa==4.9
+sudo $OE_VENV/bin/pip install -r $AXANTA_ADDONS_PATH/requirements.txt
+# $OE_VENV/bin/pip install pip==24.0 setuptools==65.5.0 wheel==0.38.4 Babel==2.9.1 chardet==4.0.0 cryptography==3.4.8 decorator==4.4.2 docutils==0.16 ebaysdk==2.1.5 freezegun==0.3.15 "gevent>=22.10.2" idna==2.10 Jinja2==2.11.3 libsass==0.20.1 lxml==4.6.5 MarkupSafe==1.1.1 num2words==0.5.9 ofxparse==0.21 passlib==1.7.4 Pillow==9.0.1 polib==1.1.0 psutil==5.8.0 psycopg2==2.9.2 pydot==1.4.2 pyOpenSSL==20.0.1 PyPDF2==1.26.0 pyserial==3.5 python-ldap==3.4.0 python-stdnum==1.16 pytz pyusb==1.0.2 qrcode==6.1 reportlab==3.5.59 requests==2.25.1 urllib3==1.26.5 vobject==0.9.6.1 Werkzeug==2.0.2 xlrd==1.2.0 XlsxWriter==1.1.2 xlwt==1.3.0 zeep==4.0.0 acme==2.10.0 astor==0.8.1 beautifulsoup4==4.12.3 boto3==1.34.113 dnspython==2.6.1 docx-mailmerge==0.5.0 geopy==2.4.1 google-auth==2.29.0 html2docx==1.6.0 josepy==1.14.0 mysql-connector==2.2.9 numpy==1.24.4 oauthlib==3.2.2 openpyxl==3.1.2 openupgradelib==3.3.0 pandas==2.0.3 paramiko==3.4.0 pybase64==1.2.0 pyfcm==1.5.4 python-docx==0.8.11 rsa==4.9
 
 echo -e "\n---- Setting permissions on home folder ----"
 sudo chown -R $OE_USER:$OE_USER $OE_HOME
