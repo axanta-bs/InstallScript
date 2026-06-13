@@ -51,6 +51,11 @@ AXANTA_BRANCH=16.0
 AXANTA_ADDONS_PATH=$OE_HOME_EXT/ax-addons-16
 AXANTA_ADDONS_DIR=$AXANTA_ADDONS_PATH,$AXANTA_ADDONS_PATH/oca_addons,$AXANTA_ADDONS_PATH/3rd_party_addons,$AXANTA_ADDONS_PATH/oca_reporting_addons,$AXANTA_ADDONS_PATH/tier_validation,$AXANTA_ADDONS_PATH/client_addons,$AXANTA_ADDONS_PATH/oca_operating_unit;
 
+TECH_ULTRA_WHATSAPP_REPO=https://github.com/axanta-bs/tu-whatsapp-v16.git
+TECH_ULTRA_WHATSAPP_BRANCH=main
+
+TECH_ULTRA_WHATSAPP_ADDONS_PATH=$OE_HOME_EXT/tu-whatsapp-v16
+
 WORKDIR=`pwd`
 
 if [[ $UID != 0 ]]; then
@@ -241,6 +246,21 @@ else
     echo -e "\nAxanta Repo Updated!\n";
 fi
 
+#--------------------------------------------------
+# Install TECH ULTRA WHATSAPP ADDONS
+#--------------------------------------------------
+echo -e "\n---- Installing Tech Ultra Whatsapp Addons ----"
+if [ ! -d $AXANTA_ADDONS_PATH ]; then
+    git clone --branch $TECH_ULTRA_WHATSAPP_BRANCH $TECH_ULTRA_WHATSAPP_REPO $TECH_ULTRA_WHATSAPP_ADDONS_PATH
+else
+    echo -e "\nTech Ultra Whatsapp Addons already exists. Updating the repo...\n";
+    cd $TECH_ULTRA_WHATSAPP_ADDONS_PATH
+    git checkout $TECH_ULTRA_WHATSAPP_BRANCH
+    git pull origin $TECH_ULTRA_WHATSAPP_BRANCH
+    cd $WORKDIR
+    echo -e "\nTech Ultra Whatsapp Addons Repo Updated!\n";
+fi
+
 echo -e "\n---- Create Python Virtual Environment ----"
 
 python3.10 -m venv $OE_VENV
@@ -275,7 +295,7 @@ sudo su root -c "printf 'logfile = /var/log/${OE_USER}/${OE_CONFIG}.log\n' >> /e
 if [ $IS_ENTERPRISE = "True" ]; then
     sudo su root -c "printf 'addons_path=${OE_HOME}/enterprise/addons,${OE_HOME_EXT}/addons\n' >> /etc/${OE_CONFIG}.conf"
 else
-    sudo su root -c "printf 'addons_path=${OE_HOME_EXT}/addons,${AXANTA_ADDONS_DIR}\n' >> /etc/${OE_CONFIG}.conf"
+    sudo su root -c "printf 'addons_path=${OE_HOME_EXT}/addons,${AXANTA_ADDONS_DIR},${TECH_ULTRA_WHATSAPP_ADDONS_PATH}\n' >> /etc/${OE_CONFIG}.conf"
 fi
 
 sudo su root -c "printf 'workers = ${WORKERS}\n' >> /etc/${OE_CONFIG}.conf"
