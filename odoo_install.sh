@@ -250,7 +250,7 @@ fi
 # Install TECH ULTRA WHATSAPP ADDONS
 #--------------------------------------------------
 echo -e "\n---- Installing Tech Ultra Whatsapp Addons ----"
-if [ ! -d $AXANTA_ADDONS_PATH ]; then
+if [ ! -d $TECH_ULTRA_WHATSAPP_ADDONS_PATH ]; then
     git clone --branch $TECH_ULTRA_WHATSAPP_BRANCH $TECH_ULTRA_WHATSAPP_REPO $TECH_ULTRA_WHATSAPP_ADDONS_PATH
 else
     echo -e "\nTech Ultra Whatsapp Addons already exists. Updating the repo...\n";
