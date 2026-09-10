@@ -1,5 +1,19 @@
 # [Odoo](https://www.odoo.com "Odoo's Homepage") Install Script
 
+## Windows development setup
+
+For Windows 10/11 development, use [`odoo_install_windows.ps1`](WINDOWS.md). It installs or checks the local toolchain, clones/updates Odoo and the configured custom addons, creates a Python virtual environment, prepares a least-privilege PostgreSQL role, writes a development config, and starts Odoo locally. It does not install production components such as Nginx, SSL, Linux init scripts, or worker processes.
+
+Download and run it from PowerShell:
+
+```powershell
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/axanta-bs/InstallScript/16.0/odoo_install_windows.ps1' -OutFile '.\odoo_install_windows.ps1'
+Set-ExecutionPolicy -Scope Process Bypass
+.\odoo_install_windows.ps1 -InstallPrerequisites
+```
+
+See [WINDOWS.md](WINDOWS.md) for options and daily-use instructions.
+
 This script is based on the install script from André Schenkels (https://github.com/aschenkels-ictstudio/openerp-install-scripts)
 but goes a bit further and has been improved. This script will also give you the ability to define an xmlrpc_port in the .conf file that is generated under /etc/
 This script can be safely used in a multi-odoo code base server because the default Odoo port is changed BEFORE the Odoo is started.
